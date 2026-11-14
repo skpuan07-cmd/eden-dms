@@ -774,3 +774,20 @@ Work Log:
 Stage Summary:
 - ระบบกลับมาทำงานปกติครบทุกส่วนหลัง restart — สาเหตุ 500 คือ Tailwind v4 สแกน worklog.md แล้วเจอ literal คลาส CSS จากการบันทึกงาน Task 26 ไม่ใช่บั๊กในโค้ด
 - ข้อตกลงสำคัญต่อไป: ห้ามเขียน literal Tailwind class (โดยเฉพาะรูปแบบ arbitrary variant/property ที่มีวงเล็บเหลี่ยม) ลงใน worklog.md เพราะ Tailwind สแกนไฟล์นี้ในทุก build — ให้บรรยายเป็นคำอธิบายแทน
+
+---
+Task ID: 27
+Agent: main (Z.ai Code)
+Task: แก้ error "API request failed with status 401: missing X-Token header" จากผู้ช่วย AI (web search/LLM โดน 401 ทั้งหมด)
+
+Work Log:
+- สืบสวน: error ไม่พบในโค้ด — dev.log ชี้มาที่ z-ai-web-dev-sdk ("Function invoke failed with status 401" ทั้ง web_search และ chat) → อ่านโค้ด SDK: มันอ่าน config JSON (baseUrl/apiKey/token) จากไฟล์ config ตามลำดับ cwd โฮมไดเรกทอรี /etc และส่ง header auth จาก field token เสมอ ถ้ามี
+- ต้นตอ: sandbox ถูกรีเซ็ตและ bootstrap ไฟล์ config ใน /etc ช้ากว่าเวลาที่ dev server เริ่ม — แอป cache ลูกค้า SDK ไว้ต่อโปรเซส (getZAI ครั้งเดียวต่อ route) จึงจับ config ฉบับไม่มี token ไว้ตลอด → ทุก request ไม่มี header auth → 401 ทั้งหมดจนต้อง restart เอง
+- แก้: สร้าง src/lib/zai.ts เป็น client กลาง (getZAI/resetZAI/withZaiRetry) — ครอบการเรียก SDK ทุกจุด: ถ้าโดน auth/config error (401, missing X-Token, config หาย) ให้ล้าง cache อ่าน config ใหม่จากไฟล์แล้วเรียกซ้ำ 1 ครั้งอัตโนมัติ (401 = งานไม่ถูกรันปลายทาง จึง retry ปลอดภัย) — error อื่น 429/timeout ไม่ยุ่ง (ปล่อย fallback เดิมจัดการ)
+- เปลี่ยน 3 route (chat, extract, search-import) มาใช้ lib กลาง ลบ local getZAI และ import เก่าทั้งหมด — จุดเรียกที่ครอบหมด: page_reader 2 จุด, web_search 3 จุด, chat completions 4 จุด
+- รีสตาร์ท dev server แล้วทดสอบ: SDK ตรง (LLM ตอบ OK, web_search ได้ 3 ผล) + agent-browser E2E: แชทใช้ข้อมูลระบบตอบจริง, คำถามเว็บได้การ์ดแหล่งภายนอก + ปุ่มนำเข้า (Task 26) แสดงถูกต้อง, lint exit 0
+- ยืนยันจากใช้งานจริง: audit log หลังแก้ — ผู้ใช้ admin ล็อกอิน 06:07 และนำเข้าโมดูลศูนย์พักพิงผ่านผู้ช่วย AI สำเร็จ 1 รายการ 06:09 (ค้นหา→พรีวิว→นำเข้า ครบ) — dev.log ไม่มี 401 อีก (มีแค่ 429 page_reader ซึ่งจัดการ graceful ด้วย fallback fetch ตาม design)
+
+Stage Summary:
+- ปัญหา 401 ปิดสนิททั้งแบบชั่วคราว (restart) และถาวร (self-heal retry ใน lib กลาง) — ต่อไปถ้า token ถูก refresh หรือ config มาช้ากว่า server ระบบจะฟื้นเองโดยไม่ต้อง restart
+- บทเรียน sandbox: ไฟล์ config ของ platform อาจถูกจัดหลัง boot → ทุก dependency ที่อ่าน config ครั้งเดียวตอนเริ่มควรมีกลไกอ่านใหม่เมื่อโดน auth error

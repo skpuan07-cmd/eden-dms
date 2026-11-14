@@ -6,7 +6,7 @@ import {
   saveJob,
 } from '@/lib/data-import'
 import { createAiTask, taskPhase, taskDone, taskFail, handleTaskStatus, withTimeout, type AiTask } from '@/lib/ai-tasks'
-import ZAI from 'z-ai-web-dev-sdk'
+import { withZaiRetry } from '@/lib/zai'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -21,12 +21,6 @@ export const maxDuration = 120
 // งานที่ใช้เวลานาน (ดาวน์โหลด URL / LLM) รันเบื้องหลัง — client ติดตามด้วย GET ?taskId=
 // (กัน proxy timeout ที่เคยคืน HTML error page จน client parse JSON พัง)
 // ============================================================
-
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null
-async function getZAI() {
-  if (!zaiInstance) zaiInstance = await ZAI.create()
-  return zaiInstance
-}
 
 interface LlmMapping {
   kind: 'data' | 'document'
@@ -79,14 +73,15 @@ ${JSON.stringify(sampleRows, null, 1).slice(0, 4000)}`
 }
 
 async function llmMap(columns: string[], rows: Record<string, string>[], note: string): Promise<LlmMapping> {
-  const zai = await getZAI()
-  const completion = await zai.chat.completions.create({
-    messages: [
-      { role: 'assistant', content: buildMappingPrompt(columns, rows.slice(0, 3), note) },
-      { role: 'user', content: 'ตรวจจับโมดูลและจับคู่คอลัมน์ของตารางนี้ (ตอบ JSON เท่านั้น)' },
-    ],
-    thinking: { type: 'disabled' },
-  })
+  const completion = await withZaiRetry((z) =>
+    z.chat.completions.create({
+      messages: [
+        { role: 'assistant', content: buildMappingPrompt(columns, rows.slice(0, 3), note) },
+        { role: 'user', content: 'ตรวจจับโมดูลและจับคู่คอลัมน์ของตารางนี้ (ตอบ JSON เท่านั้น)' },
+      ],
+      thinking: { type: 'disabled' },
+    }),
+  )
   const raw = completion.choices[0]?.message?.content?.trim() ?? ''
   const parsed = extractJson(raw)
   if (!parsed) {
@@ -97,17 +92,18 @@ async function llmMap(columns: string[], rows: Record<string, string>[], note: s
 }
 
 async function llmSummarizeDocument(content: string, label: string, note: string): Promise<string> {
-  const zai = await getZAI()
-  const completion = await zai.chat.completions.create({
-    messages: [
-      {
-        role: 'assistant',
-        content: `คุณเป็นผู้ช่วยวิเคราะห์เอกสารของระบบจัดการภัยพิบัติ EDEN DMS สรุปเนื้อหาต่อไปนี้เป็นภาษาไทย แบบ Markdown มี bullet 3-6 ข้อ ชี้ประเด็นที่เกี่ยวกับภัยพิบัติ/การช่วยเหลือ และระบุชัดว่าเนื้อหานี้เป็น "เอกสารอ่าน" ไม่สามารถแปลงเป็นข้อมูลนำเข้าโมดูลได้${note ? ` สนใจประเด็นที่ผู้ใช้ระบุ: ${note.slice(0, 300)}` : ''}`,
-      },
-      { role: 'user', content: `[${label}]\n${content.slice(0, 8000)}` },
-    ],
-    thinking: { type: 'disabled' },
-  })
+  const completion = await withZaiRetry((z) =>
+    z.chat.completions.create({
+      messages: [
+        {
+          role: 'assistant',
+          content: `คุณเป็นผู้ช่วยวิเคราะห์เอกสารของระบบจัดการภัยพิบัติ EDEN DMS สรุปเนื้อหาต่อไปนี้เป็นภาษาไทย แบบ Markdown มี bullet 3-6 ข้อ ชี้ประเด็นที่เกี่ยวกับภัยพิบัติ/การช่วยเหลือ และระบุชัดว่าเนื้อหานี้เป็น "เอกสารอ่าน" ไม่สามารถแปลงเป็นข้อมูลนำเข้าโมดูลได้${note ? ` สนใจประเด็นที่ผู้ใช้ระบุ: ${note.slice(0, 300)}` : ''}`,
+        },
+        { role: 'user', content: `[${label}]\n${content.slice(0, 8000)}` },
+      ],
+      thinking: { type: 'disabled' },
+    }),
+  )
   return completion.choices[0]?.message?.content?.trim() || 'ไม่สามารถสรุปเนื้อหาได้'
 }
 

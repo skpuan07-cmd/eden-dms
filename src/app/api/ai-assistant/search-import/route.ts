@@ -5,7 +5,7 @@ import {
   saveJob, parseFlexibleDate, normalizeRecord, type ModuleDef,
 } from '@/lib/data-import'
 import { createAiTask, taskPhase, taskDone, taskFail, handleTaskStatus, withTimeout, type AiTask } from '@/lib/ai-tasks'
-import ZAI from 'z-ai-web-dev-sdk'
+import { withZaiRetry } from '@/lib/zai'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -20,12 +20,6 @@ export const maxDuration = 120
 // รันเบื้องหลังใน runSearchImport พร้อม taskPhase ภาษาไทยทุก stage
 // client ติดตามด้วย GET ?taskId= (ทุก HTTP request สั้นเสมอ จึงไม่โดน proxy timeout)
 // ============================================================
-
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null
-async function getZAI() {
-  if (!zaiInstance) zaiInstance = await ZAI.create()
-  return zaiInstance
-}
 
 interface SearchImportInput {
   query: string
@@ -82,8 +76,7 @@ function htmlToText(html: string): string {
 /** อ่านเนื้อหาเว็บเพจ: page_reader ก่อน → fallback fetch ตรง + ตัด HTML */
 async function readPageContext(url: string): Promise<{ title: string; text: string; publishedTime: string } | null> {
   try {
-    const zai = await getZAI()
-    const result = (await zai.functions.invoke('page_reader', { url })) as {
+    const result = (await withZaiRetry((z) => z.functions.invoke('page_reader', { url }))) as {
       data?: { title?: string; html?: string; publishedTime?: string }
     }
     const title = result?.data?.title ?? ''
@@ -273,8 +266,6 @@ function isOutsideProvince(mod: ModuleDef, rec: Record<string, unknown>, provinc
 async function runSearchImport(task: AiTask, input: SearchImportInput): Promise<void> {
   const warnings: string[] = []
   try {
-    const zai = await getZAI()
-
     // ---------- 1) ค้นหาภายนอก (web search) ----------
     taskPhase(task, 'กำลังค้นหาข้อมูลจากภายนอก…')
     const fresh = !!(input.from || input.to) || /(ล่าสุด|ตอนนี้|วันนี้)/.test(input.query)
@@ -282,11 +273,13 @@ async function runSearchImport(task: AiTask, input: SearchImportInput): Promise<
     let rawResults: unknown
     try {
       rawResults = await withTimeout(
-        zai.functions.invoke('web_search', {
-          query: searchQuery,
-          num: 8,
-          ...(fresh ? { recency_days: 45 } : {}),
-        }),
+        withZaiRetry((z) =>
+          z.functions.invoke('web_search', {
+            query: searchQuery,
+            num: 8,
+            ...(fresh ? { recency_days: 45 } : {}),
+          }),
+        ),
         SEARCH_TIMEOUT_MS,
         'การค้นหาภายนอกใช้เวลานานเกินกำหนด',
       )
@@ -304,7 +297,7 @@ async function runSearchImport(task: AiTask, input: SearchImportInput): Promise<
       const simplified = `${input.query.replace(/(ล่าสุด|ตอนนี้|วันนี้|ห้วง)/g, ' ').replace(/\s+/g, ' ').trim()}${input.province ? ` ${input.province}` : ''}`.slice(0, 300)
       try {
         const retryRaw = await withTimeout(
-          zai.functions.invoke('web_search', { query: simplified, num: 8 }),
+          withZaiRetry((z) => z.functions.invoke('web_search', { query: simplified, num: 8 })),
           SEARCH_TIMEOUT_MS,
           'การค้นหาภายนอกใช้เวลานานเกินกำหนด',
         )
@@ -355,13 +348,15 @@ async function runSearchImport(task: AiTask, input: SearchImportInput): Promise<
     // ---------- 3) LLM วิเคราะห์ตามเงื่อนไข ----------
     taskPhase(task, 'กำลังวิเคราะห์ตามเงื่อนไขด้วย AI…')
     const completion = await withTimeout(
-      zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: buildAnalysisPrompt(input, searchText, pagesText) },
-          { role: 'user', content: 'วิเคราะห์ผลค้นหาและดึงข้อมูลตามเงื่อนไข (ตอบ JSON เท่านั้น)' },
-        ],
-        thinking: { type: 'disabled' },
-      }),
+      withZaiRetry((z) =>
+        z.chat.completions.create({
+          messages: [
+            { role: 'assistant', content: buildAnalysisPrompt(input, searchText, pagesText) },
+            { role: 'user', content: 'วิเคราะห์ผลค้นหาและดึงข้อมูลตามเงื่อนไข (ตอบ JSON เท่านั้น)' },
+          ],
+          thinking: { type: 'disabled' },
+        }),
+      ),
       LLM_TIMEOUT_MS,
       'AI วิเคราะห์ข้อมูลนานเกินกำหนด — กรุณาลองอีกครั้งครับ',
     )

@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import {
   createAiTask, taskPhase, taskDone, taskFail, handleTaskStatus, withTimeout, type AiTask,
 } from '@/lib/ai-tasks'
-import ZAI from 'z-ai-web-dev-sdk'
+import { withZaiRetry } from '@/lib/zai'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -26,13 +26,6 @@ interface WebSource {
   host: string
   snippet: string
   date?: string | null
-}
-
-// ใช้ instance เดียวซ้ำทั้งโปรเซส (แนวปฏิบัติจาก skill: reuse SDK instance)
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null
-async function getZAI() {
-  if (!zaiInstance) zaiInstance = await ZAI.create()
-  return zaiInstance
 }
 
 const BKK = 'Asia/Bangkok'
@@ -59,8 +52,7 @@ async function readPageContext(url: string): Promise<{ title: string; text: stri
       .trim()
 
   try {
-    const zai = await getZAI()
-    const result = (await zai.functions.invoke('page_reader', { url })) as {
+    const result = (await withZaiRetry((z) => z.functions.invoke('page_reader', { url }))) as {
       data?: { title?: string; html?: string; publishedTime?: string }
     }
     const title = result?.data?.title ?? ''
@@ -177,13 +169,14 @@ async function buildPlatformContext(): Promise<string> {
 
 // ---------- ค้นหาข้อมูลภายนอก (web search) ----------
 async function webSearch(question: string): Promise<{ text: string; sources: WebSource[] }> {
-  const zai = await getZAI()
   const wantsFresh = /(ล่าสุด|ตอนนี้|วันนี้|ปัจจุบัน|สถานการณ์|ข่าว|เมื่อไร|กี่|เท่าไหร่)/.test(question)
-  const results = (await zai.functions.invoke('web_search', {
-    query: question.slice(0, 400),
-    num: 6,
-    ...(wantsFresh ? { recency_days: 45 } : {}),
-  })) as Array<{ name?: string; url?: string; snippet?: string; host_name?: string; date?: string }>
+  const results = (await withZaiRetry((z) =>
+    z.functions.invoke('web_search', {
+      query: question.slice(0, 400),
+      num: 6,
+      ...(wantsFresh ? { recency_days: 45 } : {}),
+    }),
+  )) as Array<{ name?: string; url?: string; snippet?: string; host_name?: string; date?: string }>
 
   const sources: WebSource[] = (Array.isArray(results) ? results : [])
     .filter((r) => r.url)
@@ -289,16 +282,17 @@ async function runChat(task: AiTask, input: {
     if (pageError) userContent += `\n\n[เนื้อหาจากลิงก์ที่แนบ]\n(อ่านลิงก์ ${pageError} ไม่สำเร็จ — ให้ตอบจากความรู้ทั่วไปและแจ้งผู้ใช้ว่าอ่านลิงก์ไม่ได้)`
 
     taskPhase(task, 'กำลังวิเคราะห์และเรียบเรียงคำตอบ…')
-    const zai = await getZAI()
     const completion = await withTimeout(
-      zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: systemPrompt() },
-          ...history,
-          { role: 'user', content: userContent },
-        ],
-        thinking: { type: 'disabled' },
-      }),
+      withZaiRetry((z) =>
+        z.chat.completions.create({
+          messages: [
+            { role: 'assistant', content: systemPrompt() },
+            ...history,
+            { role: 'user', content: userContent },
+          ],
+          thinking: { type: 'disabled' },
+        }),
+      ),
       LLM_TIMEOUT_MS,
       'ผู้ช่วย AI วิเคราะห์นานเกินกำหนด — กรุณาลองส่งใหม่อีกครั้งครับ',
     )
