@@ -791,3 +791,17 @@ Work Log:
 Stage Summary:
 - ปัญหา 401 ปิดสนิททั้งแบบชั่วคราว (restart) และถาวร (self-heal retry ใน lib กลาง) — ต่อไปถ้า token ถูก refresh หรือ config มาช้ากว่า server ระบบจะฟื้นเองโดยไม่ต้อง restart
 - บทเรียน sandbox: ไฟล์ config ของ platform อาจถูกจัดหลัง boot → ทุก dependency ที่อ่าน config ครั้งเดียวตอนเริ่มควรมีกลไกอ่านใหม่เมื่อโดน auth error
+
+---
+Task ID: 27-b
+Agent: main (Z.ai Code)
+Task: พบประวัติ git ในเครื่องถูก restore กลับไป snapshot เก่าหลัง sandbox รีเซ็ตระหว่าง turn — จัดประวัติให้ตรงกับ remote และ commit งานซ้ำให้ถูกต้อง
+
+Work Log:
+- อาการ: push หลัง commit Task 27 (f0ba1da) ล้มเหลว 2 ชั้น — (1) token PAT ใน remote URL ใช้ไม่ได้ ("Invalid username or token") (2) ประวัติ local ไม่มี commit ยุค Task 23-26 (เหลือ chain เก่า 55a582d/9962470 ก่อน Task 23) และ dc1a5fa ที่เพิ่ง push ไปหายจาก local ทั้งที่ remote ยังอยู่ — สรุปว่า sandbox restore กลับ .git เป็น snapshot เก่าแต่ working tree ยังเป็นโค้ดล่าสุด
+- จัดการ: git fetch origin (อ่าน public ได้แม้ token เสีย) → git reset origin/main (mixed — ชี้ main ไปที่ dc1a5fa โดยไม่แตะ working tree) → ตรวจ diff: ไฟล์ส่วนใหญ่เปลี่ยนแค่ file mode 644→755 จาก restore (ไม่ใช่เนื้อหา) → git config core.filemode false ตัด noise → commit งานจริงใหม่เป็น 6a665f0 (zai.ts + 3 route + worklog Task 27 + db/custom.db ที่มีข้อมูลศูนย์พักพิงที่ผู้ใช้นำเข้าจริง 06:09) — ประวัติ local ตอนนี้ = remote + 1 commit (fast-forward พร้อม push ทันทีเมื่อได้ token ใหม่)
+- ตรวจเว็บหลังจัดการ: HTTP 200 ปกติ (working tree ไม่ถูกแตะตลอดกระบวนการ)
+
+Stage Summary:
+- สถานะ: โค้ด/ข้อมูลในเครื่องครบและรันได้, ประวัติ git เรียงถูกต้องรอ push — ค้างเพียง push เพราะ PAT หมดอายุ/ถูก revoke ต้องขอ token ใหม่จากผู้ใช้
+- บทเรียน: หลัง sandbox รีเซ็ตควรตรวจ git log กับ remote ก่อน commit ต่อเสมอ (เจอได้จาก git merge-base / ls-remote เทียบ HEAD)
