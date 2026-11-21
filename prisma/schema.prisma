@@ -454,6 +454,14 @@ model User {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
+  // จากแพ็กเกจ Sahana Eden (auth_user): ยืนยันอีเมล + รีเซ็ตรหัสผ่าน + ล็อกบัญชี (Task 28)
+  verificationToken String?   @unique // ยังไม่ยืนยันอีเมล (null = ปกติ/ยืนยันแล้ว)
+  emailVerifiedAt   DateTime? // เวลายืนยันอีเมลสำเร็จ (ผู้ใช้ seed เก่า = null แต่ใช้งานได้เพราะไม่มี verificationToken)
+  resetToken        String?   @unique // ลิงก์ตั้งรหัสผ่านใหม่ (หมดอายุ 30 นาที)
+  resetTokenExpiresAt DateTime?
+  failedAttempts    Int       @default(0) // นับพยายามเข้าสู่ระบบผิดติดต่อกัน
+  lockedUntil       DateTime? // ล็อกบัญชีชั่วคราวเมื่อพยายามผิดเกินกำหนด
+
   @@map("users")
 }
 
@@ -475,4 +483,20 @@ model Setting {
   updatedAt DateTime @updatedAt
 
   @@map("settings")
+}
+
+// บันทึกอีเมลที่ระบบส่ง (port จาก msg_log/msg_outbox ของ Sahana Eden — Task 28)
+// ถ้ายังไม่ตั้งค่า SMTP: เก็บเป็น status "queued" + โชว์ลิงก์สำคัญในหน้าเว็บแทน (fallback)
+model EmailLog {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  body      String
+  purpose   String   // verify | reset | alert
+  channel   String   @default("fallback") // smtp | fallback
+  status    String   @default("queued") // sent | queued | failed
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@map("email_logs")
 }

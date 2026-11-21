@@ -3,7 +3,7 @@
 import * as React from 'react'
 import {
   UserPlus, Pencil, Trash2, Users, History, Settings2, Info,
-  ShieldCheck, CircleCheck, Database, Server, Code2, KeyRound, ShieldAlert,
+  ShieldCheck, CircleCheck, Database, Server, Code2, KeyRound, ShieldAlert, MailCheck,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -44,6 +44,18 @@ interface AuditLog {
 
 interface Setting { id: string; key: string; value: string }
 
+// บันทึกอีเมลที่ระบบส่ง (Task 28 — port msg_log จาก Sahana Eden)
+interface EmailLog {
+  id: string
+  to: string
+  subject: string
+  purpose: string
+  channel: string // smtp | fallback
+  status: string // sent | queued | failed
+  error?: string | null
+  createdAt: string
+}
+
 const emptyUserForm = { name: '', email: '', role: 'officer', status: 'active', password: '' }
 
 // 12 โมดูลของระบบ (ดัดแปลงจาก Sahana Eden controllers)
@@ -74,6 +86,7 @@ export default function AdminModule() {
   // ===== Tab: ผู้ใช้ =====
   const [userQ, setUserQ] = React.useState('')
   const [logQ, setLogQ] = React.useState('')
+  const [emailQ, setEmailQ] = React.useState('')
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<User | null>(null)
   const [form, setForm] = React.useState(emptyUserForm)
@@ -87,6 +100,7 @@ export default function AdminModule() {
   const users = useFetch<User[]>('/api/users')
   const logs = useFetch<AuditLog[]>('/api/audit-logs')
   const settings = useFetch<Setting[]>('/api/settings')
+  const emails = useFetch<EmailLog[]>('/api/admin/emails')
 
   const filteredUsers = React.useMemo(() => {
     const list = users.data ?? []
@@ -101,6 +115,13 @@ export default function AdminModule() {
     if (!kw) return list
     return list.filter((l) => [l.userName, l.module, l.detail].filter(Boolean).join(' ').toLowerCase().includes(kw))
   }, [logs.data, logQ])
+
+  const filteredEmails = React.useMemo(() => {
+    const list = emails.data ?? []
+    const kw = emailQ.trim().toLowerCase()
+    if (!kw) return list
+    return list.filter((m) => [m.to, m.subject, m.status, m.purpose].filter(Boolean).join(' ').toLowerCase().includes(kw))
+  }, [emails.data, emailQ])
 
   const openCreate = () => {
     setEditing(null)
@@ -191,9 +212,10 @@ export default function AdminModule() {
       />
 
       <Tabs defaultValue="users" className="space-y-4">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap items-stretch">
           <TabsTrigger value="users" className="gap-1.5"><Users className="h-4 w-4" /> ผู้ใช้</TabsTrigger>
           <TabsTrigger value="audit" className="gap-1.5"><History className="h-4 w-4" /> บันทึกกิจกรรม</TabsTrigger>
+          {isAdmin && <TabsTrigger value="emails" className="gap-1.5"><MailCheck className="h-4 w-4" /> อีเมลที่ส่ง</TabsTrigger>}
           <TabsTrigger value="settings" className="gap-1.5"><Settings2 className="h-4 w-4" /> ตั้งค่า</TabsTrigger>
           <TabsTrigger value="about" className="gap-1.5"><Info className="h-4 w-4" /> เกี่ยวกับระบบ</TabsTrigger>
         </TabsList>
@@ -310,6 +332,66 @@ export default function AdminModule() {
             )}
           </div>
         </TabsContent>
+
+        {/* ===== Tab: อีเมลที่ส่ง (Task 28 — port msg_log) — เฉพาะแอดมิน (API บังคับ role เดียวกัน) ===== */}
+        {isAdmin && <TabsContent value="emails">
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-500">
+                บันทึก <span className="font-semibold text-slate-700">{filteredEmails.length}</span> ฉบับ (ล่าสุด 100)
+                <span className="ml-2 hidden text-xs text-slate-400 sm:inline">— ถ้ายังไม่ตั้งค่า SMTP ทุกฉบับจะถูกเก็บเป็น "รอจ่ายจริง" และลิงก์สำคัญถูกโชว์ให้ผู้ใช้แทน</span>
+              </p>
+              <SearchInput value={emailQ} onChange={setEmailQ} placeholder="ค้นหาผู้รับ/หัวข้อ/สถานะ..." />
+            </div>
+            {emails.error ? (
+              <ErrorState message={emails.error} onRetry={emails.refetch} />
+            ) : emails.loading ? (
+              <TableSkeleton rows={4} />
+            ) : filteredEmails.length === 0 ? (
+              <EmptyState message="ยังไม่มีอีเมลที่ระบบส่ง — จะมีเมื่อมีการสมัครใช้งาน/ขอตั้งรหัสผ่านใหม่" />
+            ) : (
+              <div className="max-h-96 overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/80">
+                      <TableHead className="w-[180px]">ผู้รับ</TableHead>
+                      <TableHead>หัวข้อ / เนื้อหาโดยย่อ</TableHead>
+                      <TableHead className="w-[110px]">ประเด็น</TableHead>
+                      <TableHead className="w-[130px]">สถานะ</TableHead>
+                      <TableHead className="w-[150px]">เวลา</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredEmails.map((m) => (
+                      <TableRow key={m.id} className="align-top">
+                        <TableCell className="break-all text-slate-700">{m.to}</TableCell>
+                        <TableCell className="text-slate-700">
+                          <p className="font-medium">{m.subject}</p>
+                          <p className="mt-0.5 line-clamp-2 text-xs [overflow-wrap:anywhere] text-slate-500">{m.body.slice(0, 160)}{m.body.length > 160 ? '…' : ''}</p>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="border-slate-200 bg-slate-50 text-xs text-slate-600">
+                            {m.purpose === 'verify' ? 'ยืนยันอีเมล' : m.purpose === 'reset' ? 'ตั้งรหัสใหม่' : m.purpose === 'alert' ? 'แจ้งเตือนภัย' : m.purpose}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {m.status === 'sent' ? (
+                            <Badge className="bg-emerald-100 text-emerald-800">ส่งสำเร็จ (SMTP)</Badge>
+                          ) : m.status === 'queued' ? (
+                            <Badge className="bg-amber-100 text-amber-800">รอจ่ายจริง</Badge>
+                          ) : (
+                            <Badge className="bg-red-100 text-red-800">ส่งไม่สำเร็จ</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-slate-400">{fmtDateTime(m.createdAt)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        </TabsContent>}
 
         {/* ===== Tab: ตั้งค่า (อ่านอย่างเดียว) ===== */}
         <TabsContent value="settings">

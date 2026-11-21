@@ -805,3 +805,25 @@ Work Log:
 Stage Summary:
 - สถานะ: โค้ด/ข้อมูลในเครื่องครบและรันได้, ประวัติ git เรียงถูกต้องรอ push — ค้างเพียง push เพราะ PAT หมดอายุ/ถูก revoke ต้องขอ token ใหม่จากผู้ใช้
 - บทเรียน: หลัง sandbox รีเซ็ตควรตรวจ git log กับ remote ก่อน commit ต่อเสมอ (เจอได้จาก git merge-base / ls-remote เทียบ HEAD)
+
+---
+Task ID: 28
+Agent: main (Z.ai Code)
+Task: วิเคราะห์แพ็กเกจที่ผู้ใช้แนบ (sahana-eden-improved.zip — Sahana Eden ต้นฉบับ web2py ที่ติดตั้ง+patch แล้ว) และปรับปรุง EDEN DMS ตามความสามารถที่แนบมา
+
+Work Log:
+- วิเคราะห์แพ็กเกจ: DOCUMENTATION.md + schema (386 ตาราง) + 5 patches สรุปความสามารถที่ EDEN DMS ยังไม่มีและควร port — (1) สมัครผู้ใช้ด้วยตนเอง + ยืนยันอีเมล (register flow + registration_key ของ auth_user) (2) ลืม/ตั้งรหัสผ่านด้วยลิงก์อีเมล (reset_password_key) (3) ล็อกบัญชีเมื่อพยายามผิดซ้ำ (failed_attempts/locked_until) (4) session secure cookie บน HTTPS (patch session.secure()) (5) msg_log — บันทึกอีเมลทุกฉบับที่ระบบส่ง
+- Prisma: User เพิ่ม 6 ฟิลด์ (verificationToken/emailVerifiedAt/resetToken/resetTokenExpiresAt/failedAttempts/lockedUntil) + โมเดลใหม่ EmailLog (to/subject/body/purpose/channel/status/error) → db:push; ผู้ใช้ seed เดิมใช้งานได้ทันที (เข้าระบบไม่ติดเงื่อนไขยืนยัน เพราะเงื่อนไขตรวจเฉพาะ verificationToken ค้าง)
+- ติดตั้ง nodemailer; src/lib/mailer.ts: sendMail อ่าน SMTP_HOST/PORT/USER/PASS/FROM จาก env ส่งจริงถ้าตั้งค่า + บันทึก EmailLog ทุกฉบับเสมอ; ถ้ายังไม่ตั้ง SMTP (sandbox) → สถานะ "queued" และ API คืน fallbackLink ให้หน้าเว็บโชว์ลิงก์แทน (ดีกว่า Eden ที่ติด "Unable to send verification email" — ผู้ใช้ยังไปต่อได้ครบวงจร); เทมเพลตไทย verify/reset สวยงาม + appOrigin จาก request headers
+- API ใหม่ 4 ตัว: POST /api/auth/register (ตรวจความถูกต้อง/อีเมลซ้ำ 409/สร้าง role volunteer + token), GET /api/auth/verify (ยืนยัน + audit), POST /api/auth/forgot-password (ตอบ ok เสมอ ไม่เปิดเผยว่ามีบัญชี + token 30 นาที), POST /api/auth/reset-password (ตรวจ token+หมดอายุ + ล้าง lockout); แก้ login: นับพยายามผิด → 5 ครั้งล็อก 15 นาที (423 พร้อมข้อความนับถอยหลัง), บัญชียังไม่ยืนยัน → 403, secure cookie เมื่อ x-forwarded-proto https (port patch session.secure())
+- UI หน้า login เขียนใหม่รองรับ 4 โฟลว์ในหน้าเดียว (login/register/forgot/reset + ลิงก์อีเมล ?verify=/?reset= จับ token แล้วล้าง query) — ลิงก์สลับมุมมอง, แสดงผลลัพธ์สำเร็จ + การ์ด "ลิงก์ของท่าน (โหมดทดลอง)", show/hide password, ข้อความไทยครบ (ยืนยันสำเร็จ/บัญชีถูกล็อก/รอการยืนยัน)
+- แอดมิน: API GET /api/admin/emails (role guard admin) + แท็บใหม่ "อีเมลที่ส่ง" ตาราง 5 คอลัมน์ (ผู้รับ/หัวข้อ+เนื้อหาย่อ/ประเด็น/สถานะ/เวลา) พร้อม search — ซ่อนแท็บถ้าไม่ใช่แอดมิน (UI+API สอดคล้อง)
+- แก้ responsive ที่เจอระหว่างทดสอบมือถือ 390px: TabsList 5 แท็บล้น (484px) → flex-wrap h-auto; ตารางอีเมล URL ยาวไม่ตัด → overflow-wrap anywhere + ครอบ overflow-auto
+- ทดสอบ E2E (curl): register → login ก่อนยืนยัน 403 → verify → login 200 (volunteer) → forgot → reset → login รหัสใหม่ 200; lockout 5 ครั้ง (นับถอยหลัง 4→1 → 423 ล็อก) → รหัสถูกก็ยังถูกปฏิเสธ → reset ปลดล็อกได้; duplicate 409; token ปลอม 400; cookie: https → Secure+HttpOnly, http → ไม่มี Secure
+- ทดสอบ E2E (agent-browser desktop+390px): สมัครผ่าน UI → การ์ดลิงก์ → กดลิงก์ → หน้ายืนยันสำเร็จ → ล็อกอินเข้า dashboard; forgot → ลิงก์ → ตั้งรหัสใหม่ → auto กลับ login → ล็อกอินรหัสใหม่; แอดมินเห็นแท็บอีเมล 5 ฉบับ (badge รอจ่ายจริง), อาสาสมัครไม่เห็นแท็บ; มือถือ 390px docW=390 ทุกหน้าที่แตะ; console สะอาด; lint exit 0
+- DB หลังทดสอบ: บัญชีทดสอบ 2 ใหม่ (somchai/manee.test@example.com — verified) + email_logs 5 ฉบับ เก็บไว้เป็นข้อมูลจริงจากทดสอบ
+
+Stage Summary:
+- EDEN DMS ได้ความสามารถ auth/email ครบเทียบเท่า Sahana Eden ที่แนบมา: สมัครเอง→ยืนยันอีเมล→ใช้งาน, ลืมรหัสผ่าน→ลิงก์ตั้งใหม่, ล็อกบัญชีกัน brute force, cookie ปลอดภัยบน HTTPS, บันทึกอีเมลทุกฉบับให้แอดมินตรวจได้ (msg_log)
+- สถาปัตยกรรมอีเมลยืดหยุ่น: ใส่ SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM ใน .env (เช่น Gmail App Password เหมือนแพ็กเกจ) ระบบส่งจริงทันที — ถ้าไม่ใส่ ทุกโฟลว์ยังใช้ได้ครบผ่าน fallback outbox + ลิงก์ในหน้าเว็บ และแอดมินเห็นสถานะ "รอจ่ายจริง"
+- push GitHub ยังค้างรอ PAT ใหม่จากผู้ใช้ (commit เก็บในเครื่องครบ)
