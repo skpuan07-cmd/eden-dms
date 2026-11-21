@@ -31,6 +31,7 @@ import {
   RefreshButton, EmptyState, TableSkeleton, ErrorState, FormDialog, Field,
   useConfirmDelete,
 } from './shared'
+import { AiRegisterDialog } from './ai-registration'
 
 // ===== Types =====
 interface Person {
@@ -426,6 +427,12 @@ export default function PersonsModule() {
             <Button variant="outline" size="sm" onClick={exportCsv}>
               <Download className="h-4 w-4" /> ส่งออก CSV
             </Button>
+            {/* Task 29 — AI Registration (OCR บัตร / Voice) จากแผน Sahana Eden บทที่ 10-11 */}
+            <AiRegisterDialog
+              incidents={incidents ?? []}
+              shelters={shelters ?? []}
+              onCreated={() => refetch()}
+            />
             <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700">
               <Plus className="h-4 w-4" /> ลงทะเบียนบุคคล
             </Button>

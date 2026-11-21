@@ -12,9 +12,11 @@ export function middleware(req: NextRequest) {
 
   const isLoginPage = pathname === '/login'
   const isAuthApi = pathname.startsWith('/api/auth/')
+  // Task 29 — health endpoint เปิดให้ monitoring เรียกได้โดยไม่ต้อง login (ไม่มีข้อมูลส่วนบุคคล)
+  const isHealthApi = pathname === '/api/health'
   const isStatic = pathname.startsWith('/_next') || pathname === '/favicon.ico' || pathname.startsWith('/images') || pathname.startsWith('/public-data')
 
-  if (isLoginPage || isAuthApi || isStatic) return NextResponse.next()
+  if (isLoginPage || isAuthApi || isHealthApi || isStatic) return NextResponse.next()
 
   // API ที่ไม่ใช่ auth → 401 JSON (ไม่ redirect เพราะ fetch จะตาม redirect แล้วได้ HTML กลับมา)
   if (pathname.startsWith('/api/')) {

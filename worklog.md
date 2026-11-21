@@ -842,3 +842,24 @@ Work Log:
 Stage Summary:
 - งานตามไฟล์แนบปิดสมบูรณ์: วิเคราะห์ครบ (เอกสาร + schema 386 ตาราง + patches 5 ไฟล์ + ภาพหน้าจอ) เลือก port เฉพาะส่วน auth/อีเมลที่ทางเว็บ2ไพ patch จริง และทุกโฟลว์ผ่านการทดสอบ E2E ทั้ง curl และเบราว์เซอร์ (เดสก์ท็อป + มือถือ)
 - ค้างเพียง push GitHub (4 commit ในเครื่อง: 6a665f0, 6cce9de, 513d5cd, 0a406a7 + งานนี้) — รอ PAT ใหม่จากผู้ใช้
+---
+Task ID: 29
+Agent: main (Z.ai Code)
+Task: ศึกษาเอกสาร 2 ฉบับที่ผู้ใช้แนบ (Sahana_Eden_Strategic_Improvement_Plan.pdf + Sahana_Eden_Modernization_Recommendations.pdf) และ port ความสามารถที่ใช้ได้จริงเข้า EDEN DMS (Next.js) — เลือกทำ AI Registration (OCR บัตรประชาชน + Voice) ตามโฟกัสของแผน + quick wins ด้าน security/observability
+
+Work Log:
+- วิเคราะห์เอกสาร: แผนกลยุทธ์ 56 หน้า (5 AI features: OCR/Voice/SMS bot/Bulk NLQ/Event Hub — โฟกัสลดเวลาลงทะเบียน 8-15 นาที → 2-5 นาที + PDPA 100%) และ Modernization 51 หน้า (25 งาน 5 phases) — จัดลำดับตามความเหมาะกับ stack เรา: OCR+Voice ใช้ skill VLM/ASR ที่มีอยู่ทำได้ทันที, SMS bot (ต้อง Line/Twilio token ภายนอก) กับ PostgreSQL/Docker (ขัดข้อบังคับ sandbox/stack) เลื่อน, Bulk NLQ มีแล้วครึ่งหนึ่งจาก AI search-import (Task 26), Event Hub มีแล้วในรูปโมดูลเหตุการณ์+incidentId
+- สร้าง lib/thai.ts (port จากแผนบทที่ 10-11): ตรวจ checksum เลขบัตร 13 หลัก, แปลงวันที่ไทยพ.ศ.→ค.ศ. ("15 มี.ค. 2535"→1992-03-15), ตัดคำนำหน้าชื่อ (นาย/นาง/นางสาว/ยศ — กันคำ "นายก" ไม่ถูกตัด, เรียงยาว→สั้นกัน "นาง" ตัด "นางสาว"), normalize เพศ/เบอร์โทร, คำนวณอายุจากวันเกิด — ผ่านชุดทดสอบ 20+ เคสรวม edge cases
+- lib/rate-limit.ts: sliding window ในหน่วยความจำ ตามแผนบทที่ 9.5 (จำกัด AI endpoints) — 10 ครั้ง/นาที/ผู้ใช้สำหรับ OCR และเสียง, มี housekeeping กัน memory leak, 429 + Retry-After
+- lib/person-registration.ts: normalize ผล JSON จาก AI (รับได้ทั้ง key ไทย/อังกฤษ, ห้ามเดา — ค่าไม่ชัดคืนว่าง), duplicate detection 3 ระดับ (เลขบัตร exact > ชื่อ+นามสกุล+วันเกิด > ชื่อ+นามสกุล), extractJsonFromLlm (รองรับ markdown fence/object ในข้อความ)
+- API ใหม่ 2 ตัว ตามแผน Feature 1+2: POST /api/persons/ocr (VLM glm-5.3-flash อ่านบัตร — PDPA บังคับ 403 ถ้าไม่ยินยอม, รูปไม่เก็บในระบบเด็ดขาด, 5MB cap, human-in-the-loop คืนฟิลด์ให้ตรวจ/แก้ก่อนบันทึกผ่าน CRUD ปกติ) และ POST /api/persons/voice (ASR→LLM แยกฟิลด์, โครงสร้างเดียวกัน)
+- ค้นพบข้อจำกัดจริง: ASR ของ platform แปลงเสียงไทยเป็นอังกฤษเพี้ยน (ทดสอบ 3 แบบด้วยเสียงจาก TTS) — แก้แบบตรงไปตรงมา: backend ตรวจว่า transcript ไม่มีอักษรไทย → 422 code thai_unsupported พร้อมข้อความแนะนำช่องทางบัตร, UI แสดง notice สีเหลือง inline แทน toast (โครงสร้าง voice พร้อมใช้ทันทีเมื่อ ASR รองรับไทยในอนาคต — ไม่ต้องแก้โค้ด)
+- UI: component ใหม่ ai-registration.tsx (dialog ในโมดูลทะเบียนบุคคล) — 2 แท็ก (บัตร/เสียง), switch ยินยอม PDPA เป็นประตูก่อนทุกอย่าง, อัปโหลด/ถ่ายรูป (capture=environment สำหรับมือถือในสนาม), บันทึกเสียง MediaRecorder + อัปโหลดไฟล์, pre-fill แก้ไขได้ทุกฟิลด์, การ์ดเตือนข้อมูลซ้ำ + เตือน checksum บัตรไม่ผ่าน, บันทึกเข้า notes ว่า "ลงทะเบียนผ่าน AI — ตรวจสอบโดยเจ้าหน้าที่" (audit trail ใน record เอง), ปุ่ม "ลงทะเบียนด้วย AI" เพิ่มในหัวโมดูล
+- Quick wins จาก Modernization: GET /api/health (ตรวจ DB+AI config, เปิดโดยไม่ต้อง login ผ่าน middleware exception, 503 เมื่อ degraded) + security headers ใน next.config (X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy เปิด mic+camera เฉพาะ origin เองเพราะฟีเจอร์ถ่ายบัตร/บันทึกเสียงใช้)
+- ทดสอบ E2E ครบ: (curl) OCR รูปบัตรจริงที่สร้างเอง → ดึงชื่อ/บัตร/วันเกิด/ที่อยู่ + แปลงพ.ศ. + คำนวณอายุ + เตือน checksum ไม่ผ่านถูกต้อง, duplicate จับ name_dob เมื่อมีบุคคลเดียวกันแล้ว, 401/403/400/413 ครบ; (agent-browser) เปิด dialog → ปุ่มถูกปิดจนยินยอม → อัปโหลดบัตร → OCR pre-fill → แก้ชื่อ (human review) → บันทึก → สมศรี ใจดี โผล่ในตารางพร้อม notes, แท็บเสียงอัปโหลด wav → notice ข้อจำกัด inline ตามดีไซน์, มือถือ 390px ปกติ, console สะอาด; audit_logs มี ai_ocr/ai_voice บันทึกพร้อมข้อความ PDPA
+- ปรับแก้ระหว่างทดสอบ: โมเดล vision glm-4v-plus (ตามแผน) ตอบ JSON เสีย → เปลี่ยนเป็น glm-5.3-flash (รุ่นที่ CLI ใช้จริง) ทำงานสมบูรณ์, normalizeMonthKey + NAME_TITLES เรียงใหม่หลังเจอ edge case
+
+Stage Summary:
+- แผนทั้ง 2 ฉบับถูกแปลงเป็นงานจริงตามความเหมาะสม: Feature 1 (OCR) ใช้งานได้ครบวงจรพร้อม PDPA/duplicate/human-in-the-loop ตาม ADR 0004, Feature 2 (Voice) โครงสร้างพร้อมแต่พบข้อจำกัด ASR ภาษาไทยของ platform — จัดการ graceful พร้อม notice, Quick wins (health + headers) ติดตั้งแล้ว
+- งานที่เหลือจากแผนสำหรับอนาคต (บันทึกไว้ไม่ได้ทำ): SMS/Line bot (ต้อง token จริง), Bulk import ที่เพิ่ม paste-table, 2FA admin, column encryption (PDPA ขั้นสูง)
+- push GitHub ยังค้างรอ PAT ใหม่จากผู้ใช้ (รวม 6 commit ในเครื่องแล้ว)
